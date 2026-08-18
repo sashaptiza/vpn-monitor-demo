@@ -1,0 +1,1164 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<!-- DEMO-SHIM -->
+<script>
+/* ДЕМО-ШАР для VPN Monitor.
+   Підміняє window.fetch вигаданими даними. Жодного звернення до реального сервера,
+   жодних справжніх клієнтів. Усі імена, IP та логи — синтетичні. */
+(function () {
+    'use strict';
+
+    localStorage.setItem('vpn_token', 'DEMO');
+
+    var BASE = [
+        { username: 'office-kyiv',      client_ip: '10.77.0.11', iface: 'ppp0', ext: '134.249.165.42', online: true,  disabled: false },
+        { username: 'warehouse-brovary', client_ip: '10.77.0.12', iface: 'ppp1', ext: '91.203.14.88',   online: true,  disabled: false },
+        { username: 'shop-lviv',        client_ip: '10.77.0.13', iface: 'ppp2', ext: '134.249.165.51', online: true,  disabled: false },
+        { username: 'terminal-odesa',   client_ip: '10.77.0.14', iface: null,   ext: '91.203.14.77',   online: false, disabled: false },
+        { username: 'router-poltava',   client_ip: '10.77.0.15', iface: 'ppp3', ext: '134.249.165.60', online: true,  disabled: false },
+        { username: 'kiosk-kharkiv',    client_ip: '10.77.0.16', iface: null,   ext: '91.203.14.31',   online: false, disabled: false },
+        { username: 'backup-gw',        client_ip: '10.77.0.17', iface: 'ppp4', ext: '134.249.165.77', online: true,  disabled: false },
+        { username: 'legacy-node',      client_ip: '10.77.0.18', iface: null,   ext: null,             online: false, disabled: true }
+    ];
+
+    function hash(s) {
+        var h = 0, i;
+        for (i = 0; i < s.length; i++) { h = ((h << 5) - h + s.charCodeAt(i)) | 0; }
+        return Math.abs(h);
+    }
+
+    function iso(msAgo) {
+        return new Date(Date.now() - msAgo).toISOString();
+    }
+
+    function clients() {
+        return BASE.map(function (c) {
+            var h = hash(c.username);
+            return {
+                username: c.username,
+                client_ip: c.client_ip,
+                status: c.online ? 'online' : 'offline',
+                disabled: c.disabled,
+                interface: c.online ? c.iface : null,
+                remote_ip: c.ext,
+                last_login: iso(c.online ? (h % 40000) * 1000 + 600000 : (h % 90) * 3600000 + 7200000),
+                last_logout: c.online ? null : iso((h % 40) * 3600000 + 3600000)
+            };
+        });
+    }
+
+    function onlineCount() {
+        return BASE.filter(function (c) { return c.online && !c.disabled; }).length;
+    }
+
+    function traffic(username) {
+        var h = hash(username);
+        return {
+            rx_bytes: 900000000 + (h % 7000000000),
+            tx_bytes: 120000000 + (h % 900000000),
+            rx_packets: 1400000 + (h % 9000000),
+            tx_packets: 900000 + (h % 5000000),
+            rx_errors: h % 3,
+            tx_errors: 0
+        };
+    }
+
+    function timeline(h, online) {
+        if (online) {
+            return [[0, 26000 + (h % 4000)], [31000 + (h % 3000), 86400]];
+        }
+        return [[0, 18000 + (h % 5000)], [23000 + (h % 4000), 61000 + (h % 6000)]];
+    }
+
+    function session(username, online) {
+        var h = hash(username);
+        return {
+            online_now: online,
+            current_session_sec: online ? 3600 + (h % 50000) : null,
+            current_offline_sec: online ? null : 1800 + (h % 40000),
+            uptime_24h_pct: online ? 96 + (h % 4) : 61 + (h % 22),
+            uptime_7d_pct: online ? 93 + (h % 6) : 70 + (h % 18),
+            reconnects_24h: h % 5,
+            connects_24h: 1 + (h % 6),
+            avg_session_sec: 9000 + (h % 40000),
+            longest_session_sec: 90000 + (h % 300000),
+            sessions_total: 40 + (h % 220),
+            channel_switches_total: h % 14,
+            timeline_24h: timeline(h, online)
+        };
+    }
+
+    var LOGS = [
+        'xl2tpd[812]: Connection established to 91.203.14.88, 1701. Local: 6134, Remote: 15 (ref=0/0).',
+        'pppd[1461]: Connect: ppp1 <--> /dev/pts/3',
+        'pppd[1461]: MPPE 128-bit stateless compression enabled',
+        'pppd[1461]: local  IP address 10.77.0.1',
+        'pppd[1461]: remote IP address 10.77.0.12',
+        'charon: 07[IKE] IKE_SA rw[42] established between 10.0.0.5[srv]...91.203.14.88[client]',
+        'charon: 09[IKE] CHILD_SA net-1{7} established with SPIs c1a4f2e1_i 8b30d9aa_o',
+        'xl2tpd[812]: Maximum retries exceeded for tunnel 41233. Closing.',
+        'pppd[1398]: Connection terminated: link is down',
+        'pppd[1398]: Modem hangup',
+        'charon: 12[IKE] deleting IKE_SA rw[39] between 10.0.0.5[srv]...91.203.14.31[client]',
+        'xl2tpd[812]: Connection established to 134.249.165.42, 1701. Local: 41765, Remote: 8 (ref=0/0).',
+        'pppd[1502]: Connect: ppp4 <--> /dev/pts/6',
+        'pppd[1502]: remote IP address 10.77.0.17'
+    ].join('\n');
+
+    var AI_LOGS = 'Демо-відповідь (без звернення до моделі).\n\n'
+        + 'За останню добу у логах два типові сюжети.\n\n'
+        + '1) Штатні підключення. Рядки "Connection established" від xl2tpd і далі '
+        + '"CHILD_SA ... established" від charon означають, що тунель піднявся повністю: '
+        + 'спершу L2TP, потім IPsec. Це норма.\n\n'
+        + '2) Один обрив. "Maximum retries exceeded for tunnel 41233" плюс "Modem hangup" '
+        + 'на ppp1 — клієнт зник із мережі, а не був відключений сервером. Найчастіша '
+        + 'причина у цій схемі — перемикання абонента з дротового каналу на LTE: зовнішня '
+        + 'адреса змінюється, стара сесія добиває ретраї й падає.\n\n'
+        + 'Що робити: якщо обриви на одному клієнті частішають — дивитись не на сервер, '
+        + 'а на його канал. Лічильник "перемикань каналу" у картці клієнта показує це прямо.';
+
+    function json(data, status) {
+        return new Response(JSON.stringify(data), {
+            status: status || 200,
+            headers: { 'Content-Type': 'application/json' }
+        });
+    }
+
+    function demoBlock(msg) {
+        return json({ error: msg }, 403);
+    }
+
+    var origFetch = window.fetch.bind(window);
+
+    window.fetch = function (input, init) {
+        var url = (typeof input === 'string') ? input : (input && input.url) || '';
+        var path = url.replace(/^https?:\/\/[^/]+/, '').split('?')[0];
+        var method = ((init && init.method) || 'GET').toUpperCase();
+        var m;
+
+        if (path === '/status') {
+            return Promise.resolve(json({
+                clients_online: onlineCount(),
+                strongswan: 'active',
+                xl2tpd: 'active',
+                updated_at: new Date().toISOString()
+            }));
+        }
+
+        if (path === '/clients' && method === 'GET') {
+            var list = clients();
+            return Promise.resolve(json({
+                clients: list,
+                count: list.length,
+                online_count: onlineCount(),
+                updated_at: new Date().toISOString()
+            }));
+        }
+
+        if (path === '/clients' && method === 'POST') {
+            return Promise.resolve(demoBlock('Демо-режим: додавання клієнтів вимкнено.'));
+        }
+
+        m = path.match(/^\/clients\/([^/]+)\/stats$/);
+        if (m) {
+            var uname = decodeURIComponent(m[1]);
+            var base = BASE.filter(function (c) { return c.username === uname; })[0];
+            if (!base) { return Promise.resolve(json({ error: 'Not found' }, 404)); }
+            var row = clients().filter(function (c) { return c.username === uname; })[0];
+            row.updated_at = new Date().toISOString();
+            row.traffic = base.online ? traffic(uname) : null;
+            row.session = session(uname, base.online);
+            return Promise.resolve(json(row));
+        }
+
+        m = path.match(/^\/clients\/([^/]+)\/toggle$/);
+        if (m) {
+            return Promise.resolve(demoBlock('Демо-режим: вмикання та вимикання клієнтів недоступне.'));
+        }
+
+        m = path.match(/^\/clients\/([^/]+)\/ping$/);
+        if (m) {
+            var ip = decodeURIComponent(m[1]);
+            var b = BASE.filter(function (c) { return c.client_ip === ip; })[0];
+            var alive = !!(b && b.online);
+            var avg = (12 + (hash(ip) % 40)) + '.' + (hash(ip) % 9);
+            return Promise.resolve(json({
+                ip: ip,
+                alive: alive,
+                loss_pct: alive ? '0' : '100',
+                avg_ms: alive ? avg : null,
+                raw: alive
+                    ? 'PING ' + ip + ' 56(84) bytes of data.\n'
+                        + '64 bytes from ' + ip + ': icmp_seq=1 ttl=64 time=' + avg + ' ms\n'
+                        + '64 bytes from ' + ip + ': icmp_seq=2 ttl=64 time=' + avg + ' ms\n'
+                        + '64 bytes from ' + ip + ': icmp_seq=3 ttl=64 time=' + avg + ' ms\n\n'
+                        + '3 packets transmitted, 3 received, 0% packet loss'
+                    : 'PING ' + ip + ' 56(84) bytes of data.\n\n'
+                        + '3 packets transmitted, 0 received, 100% packet loss'
+            }));
+        }
+
+        m = path.match(/^\/clients\/([^/]+)\/exec$/);
+        if (m) {
+            return Promise.resolve(demoBlock('Демо-режим: виконання команд на пристроях вимкнено.'));
+        }
+
+        if (path === '/logs') {
+            return Promise.resolve(json({ logs: LOGS }));
+        }
+
+        if (path === '/ai/explain-logs') {
+            return Promise.resolve(json({ explanation: AI_LOGS, model: 'demo' }));
+        }
+
+        if (path === '/ai/ask') {
+            return Promise.resolve(json({
+                answer: 'Демо-відповідь (без звернення до моделі). У живій панелі тут '
+                    + 'відповідає мовна модель, якій передається стан сервісів, останні '
+                    + 'рядки журналу xl2tpd і опис інфраструктури. Тому вона відповідає '
+                    + 'предметно про цей сервер, а не загальними словами.'
+            }));
+        }
+
+        if (path === '/ampere') {
+            return Promise.resolve(json({
+                running: true,
+                pid: '20431',
+                success: null,
+                last_logs: '[2026-08-15 19:58:02] спроба 8412: Out of host capacity\n'
+                    + '[2026-08-15 19:59:04] спроба 8413: Out of host capacity\n'
+                    + '[2026-08-15 20:00:07] спроба 8414: Out of host capacity',
+                updated_at: new Date().toISOString()
+            }));
+        }
+
+        if (path === '/ampere/start' || path === '/ampere/stop') {
+            return Promise.resolve(demoBlock('Демо-режим: керування процесом вимкнено.'));
+        }
+
+        if (path === '/health') {
+            return Promise.resolve(json({ status: 'ok', time: new Date().toISOString() }));
+        }
+
+        return origFetch(input, init);
+    };
+})();
+
+</script>
+
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VPN Monitor — демо</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgcng9IjIwIiBmaWxsPSIjMTBlYjY4Ii8+PHBhdGggZD0iTTUwIDIwIEMzMCAyMCAyMCA0MCAyMCA0MCBMMzAgNjAgTDUwIDgwIEw3MCA2MCBMODAgNDAgQzgwIDQwIDcwIDIwIDUwIDIwIFoiIGZpbGw9IiNmZmYiLz48L3N2Zz4=">
+    <meta name="theme-color" content="#0f172a">
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="data:application/manifest+json,{&quot;name&quot;:&quot;VPN Monitor&quot;,&quot;short_name&quot;:&quot;VPN&quot;,&quot;start_url&quot;:&quot;/&quot;,&quot;display&quot;:&quot;standalone&quot;,&quot;background_color&quot;:&quot;#0f172a&quot;,&quot;theme_color&quot;:&quot;#0f172a&quot;,&quot;icons&quot;:[{&quot;src&quot;:&quot;data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48cmVjdCB3aWR0aD0iMTAwIiBoZWlnaHQ9IjEwMCIgcng9IjIwIiBmaWxsPSIjMTBlYjY4Ii8+PHBhdGggZD0iTTUwIDIwIEMzMCAyMCAyMCA0MCAyMCA0MCBMMzAgNjAgTDUwIDgwIEw3MCA2MCBMODAgNDAgQzgwIDQwIDcwIDIwIDUwIDIwIFoiIGZpbGw9IiNmZmYiLz48L3N2Zz4=&quot;,&quot;sizes&quot;:&quot;192x192&quot;,&quot;type&quot;:&quot;image/svg+xml&quot;}]}">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --text-color: #f8fafc;
+            --card-bg: rgba(30, 41, 59, 0.7);
+            --card-border: rgba(255, 255, 255, 0.1);
+            --accent-color: #10eb68;
+            --danger-color: #ef4444;
+            --ai-color: #8b5cf6;
+            --ampere-color: #f59e0b;
+            --input-bg: rgba(15, 23, 42, 0.6);
+            --glass-blur: 16px;
+        }
+
+        [data-theme="light"] {
+            --bg-color: #f1f5f9;
+            --text-color: #0f172a;
+            --card-bg: rgba(255, 255, 255, 0.75);
+            --card-border: rgba(0, 0, 0, 0.05);
+            --accent-color: #059669;
+            --danger-color: #dc2626;
+            --ai-color: #6d28d9;
+            --ampere-color: #d97706;
+            --input-bg: rgba(255, 255, 255, 0.9);
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
+
+        body { background-color: var(--bg-color); color: var(--text-color); transition: background-color 0.4s ease, color 0.4s ease; min-height: 100vh; display: flex; flex-direction: column; }
+        .no-scroll { overflow: hidden !important; }
+
+        .glass-card { background: var(--card-bg); backdrop-filter: blur(var(--glass-blur)); -webkit-backdrop-filter: blur(var(--glass-blur)); border: 1px solid var(--card-border); border-radius: 24px; padding: 30px 20px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05); transition: background 0.4s ease, border 0.4s ease; }
+
+        /* --- Login Screen --- */
+        #login-screen { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; padding: 20px; }
+        #login-screen .glass-card { width: 100%; max-width: 400px; }
+        .input-group { margin: 20px 0; }
+        input { width: 100%; padding: 16px; border-radius: 12px; border: 1px solid var(--card-border); background: var(--input-bg); color: var(--text-color); font-size: 16px; outline: none; transition: border-color 0.3s, background 0.4s, color 0.4s; }
+        input:focus { border-color: var(--accent-color); }
+        button { width: 100%; padding: 16px; border-radius: 12px; border: none; background: var(--accent-color); color: #fff; font-size: 16px; font-weight: 600; cursor: pointer; transition: transform 0.1s, opacity 0.3s; }
+        button:active { transform: scale(0.98); }
+
+        /* --- Main App Screen --- */
+        #app-screen { display: none; padding: 20px; padding-top: 40px; padding-bottom: 100px; flex: 1; flex-direction: column; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }
+        .title-group h1 { font-size: 28px; font-weight: 700; }
+        .title-group p { font-size: 14px; opacity: 0.7; margin-top: 4px; }
+        .theme-toggle { background: var(--card-bg); border: 1px solid var(--card-border); padding: 10px; border-radius: 50%; width: 48px; height: 48px; display: flex; align-items: center; justify-content: center; color: var(--text-color); transition: background 0.4s; }
+
+        /* --- Clients View --- */
+        .client-list { display: flex; flex-direction: column; gap: 16px; }
+        .client-card { display: flex; align-items: center; justify-content: space-between; padding: 20px; border-radius: 20px; }
+        .client-info { display: flex; align-items: center; gap: 16px; }
+        .status-dot { width: 14px; height: 14px; background-color: var(--accent-color); border-radius: 50%; box-shadow: 0 0 12px var(--accent-color); animation: pulse 2s infinite; }
+        .status-dot.offline { background-color: var(--card-border); box-shadow: none; animation: none; }
+        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(16, 235, 104, 0.4); } 70% { box-shadow: 0 0 0 10px rgba(16, 235, 104, 0); } 100% { box-shadow: 0 0 0 0 rgba(16, 235, 104, 0); } }
+
+        /* --- Client Detail Bottom Sheet --- */
+        #detail-overlay { display: none; }
+        #detail-sheet { position: fixed; inset: 0; background: var(--bg-color); z-index: 301; padding: 0 18px 40px; overflow-y: auto; overflow-x: hidden; opacity: 0; visibility: hidden; transition: opacity 0.2s ease, visibility 0.2s ease; }
+        #detail-sheet.open { opacity: 1; visibility: visible; }
+        .detail-topbar { position: sticky; top: 0; background: var(--bg-color); display: flex; align-items: center; gap: 12px; padding: 14px 0 10px; z-index: 5; }
+        .detail-back { background: var(--input-bg); border: none; color: var(--text-color); font-size: 20px; width: 44px; height: 44px; border-radius: 12px; cursor: pointer; flex: 0 0 auto; padding: 0; }
+        .detail-topbar-title { font-size: 18px; font-weight: 600; }
+        .timeline-wrap { background: var(--input-bg); border-radius: 10px; height: 26px; overflow: hidden; display: flex; margin-top: 6px; }
+        .timeline-seg { height: 100%; }
+        .timeline-seg.up { background: var(--success-color, #2ecc71); }
+        .sheet-handle { width: 40px; height: 4px; background: var(--card-border); border-radius: 2px; margin: 0 auto 20px; }
+        .detail-header { display: flex; align-items: center; gap: 14px; margin-bottom: 24px; }
+        .detail-avatar { width: 52px; height: 52px; border-radius: 16px; background: var(--input-bg); display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: 700; color: var(--accent-color); border: 1px solid var(--card-border); flex-shrink: 0; }
+        .detail-name { font-size: 22px; font-weight: 700; }
+        .detail-status { font-size: 13px; margin-top: 3px; opacity: 0.6; }
+        .detail-status.online { color: var(--accent-color); opacity: 1; }
+        .detail-status.disabled { color: var(--danger-color); opacity: 1; }
+        .toggle-btn { width: 100%; padding: 14px; border-radius: 14px; font-size: 15px; font-weight: 600; margin-bottom: 16px; border: none; cursor: pointer; transition: opacity 0.2s, transform 0.1s; }
+        .toggle-btn:active { transform: scale(0.98); }
+        .toggle-btn.disable { background: rgba(239,68,68,0.15); color: var(--danger-color); border: 1px solid rgba(239,68,68,0.3); }
+        .toggle-btn.enable  { background: rgba(16,235,104,0.15); color: var(--accent-color); border: 1px solid rgba(16,235,104,0.3); }
+        .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+        .stat-box { background: var(--input-bg); border: 1px solid var(--card-border); border-radius: 16px; padding: 14px 16px; }
+        .stat-box .stat-label { font-size: 11px; opacity: 0.5; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }
+        .stat-box .stat-value { font-size: 18px; font-weight: 700; font-family: monospace; }
+        .stat-box .stat-sub { font-size: 11px; opacity: 0.5; margin-top: 2px; }
+        .stat-box.full-width { grid-column: 1 / -1; }
+        .traffic-bar-wrap { height: 6px; background: var(--card-border); border-radius: 3px; margin-top: 10px; overflow: hidden; }
+        .traffic-bar { height: 100%; border-radius: 3px; transition: width 0.4s ease; }
+        .traffic-bar.rx { background: var(--accent-color); }
+        .traffic-bar.tx { background: #60a5fa; }
+        #detail-refresh-note { text-align: center; font-size: 12px; opacity: 0.4; margin-top: 8px; }
+
+        .fab { position: fixed; bottom: 100px; right: 20px; width: 56px; height: 56px; border-radius: 50%; background: var(--accent-color); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 30px; box-shadow: 0 4px 15px rgba(0,0,0,0.3); cursor: pointer; z-index: 100; transition: transform 0.2s; border: none; }
+        .fab:active { transform: scale(0.95); }
+
+        #add-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); backdrop-filter: blur(5px); z-index: 200; align-items: center; justify-content: center; padding: 20px; }
+        #add-modal .glass-card { width: 100%; max-width: 400px; display: flex; flex-direction: column; gap: 15px; }
+        .modal-buttons { display: flex; gap: 10px; margin-top: 10px; }
+        .btn-cancel { background: var(--card-border); color: var(--text-color); }
+
+        .client-details h3 { font-size: 18px; margin-bottom: 4px; }
+        .client-details p { font-size: 13px; opacity: 0.6; }
+        .client-ip { font-family: monospace; font-size: 14px; background: var(--input-bg); padding: 8px 12px; border-radius: 10px; }
+
+        /* --- Logs View --- */
+        #logs-view { display: none; flex-direction: column; gap: 15px; flex: 1; }
+        .logs-container { background: var(--input-bg); padding: 20px; border-radius: 16px; font-family: monospace; font-size: 13px; overflow-y: auto; max-height: 50vh; white-space: pre-wrap; border: 1px solid var(--card-border); color: var(--text-color); line-height: 1.4; }
+        #ai-chat { display: block; padding: 20px; }
+        #ai-chat-log { max-height: 380px; overflow-y: auto; font-size: 14px; line-height: 1.55; }
+        #ai-explanation { display: none; padding: 20px; font-size: 15px; line-height: 1.6; border-left: 4px solid var(--ai-color); }
+
+        /* --- Ampere View --- */
+        #ampere-view { display: none; flex-direction: column; gap: 16px; flex: 1; }
+
+        .ampere-status-card { border-radius: 20px; padding: 24px 20px; display: flex; align-items: center; gap: 16px; }
+        .ampere-status-card.running { border: 1px solid rgba(245, 158, 11, 0.4); background: rgba(245, 158, 11, 0.08); }
+        .ampere-status-card.stopped { border: 1px solid rgba(239, 68, 68, 0.3); background: rgba(239, 68, 68, 0.06); }
+        .ampere-status-card.success { border: 1px solid rgba(16, 235, 104, 0.5); background: rgba(16, 235, 104, 0.08); }
+
+        .ampere-icon { font-size: 36px; flex-shrink: 0; }
+        .ampere-status-title { font-size: 18px; font-weight: 700; }
+        .ampere-status-sub { font-size: 13px; opacity: 0.6; margin-top: 3px; }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .ampere-spinner { display: inline-block; animation: spin 1.5s linear infinite; }
+
+        .ampere-btn-row { display: flex; gap: 12px; }
+        .ampere-btn-start { background: rgba(245,158,11,0.2); color: var(--ampere-color); border: 1px solid rgba(245,158,11,0.4); }
+        .ampere-btn-stop  { background: rgba(239,68,68,0.15); color: var(--danger-color); border: 1px solid rgba(239,68,68,0.3); }
+
+        .ampere-log-wrap { background: var(--input-bg); border: 1px solid var(--card-border); border-radius: 16px; padding: 16px; font-family: monospace; font-size: 12px; white-space: pre-wrap; overflow-y: auto; max-height: 45vh; line-height: 1.5; color: var(--text-color); }
+        .ampere-log-line-ok   { color: var(--accent-color); }
+        .ampere-log-line-err  { color: var(--danger-color); }
+        .ampere-log-line-info { opacity: 0.7; }
+
+        #ampere-refresh-note { text-align: center; font-size: 12px; opacity: 0.4; margin-top: 4px; }
+
+        /* --- Navigation --- */
+        .bottom-nav { position: fixed; bottom: 20px; left: 20px; right: 20px; display: flex; justify-content: space-around; padding: 15px; border-radius: 20px; z-index: 50; }
+        .nav-item { display: flex; flex-direction: column; align-items: center; gap: 6px; opacity: 0.4; cursor: pointer; transition: opacity 0.3s, color 0.3s; }
+        .nav-item.active { opacity: 1; color: var(--accent-color); }
+        .nav-item.active.ampere-tab { color: var(--ampere-color); }
+
+        .loading, #error-msg { text-align: center; padding: 20px; opacity: 0.7; }
+        #error-msg { color: var(--danger-color); opacity: 1; }
+    </style>
+</head>
+<body>
+<div id="demo-badge" style="position:fixed;left:12px;bottom:12px;z-index:99999;
+ background:#f59e0b;color:#1c1917;font:600 12px/1.3 Inter,system-ui,sans-serif;
+ padding:7px 12px;border-radius:999px;box-shadow:0 2px 10px rgba(0,0,0,.35);
+ letter-spacing:.2px;">ДЕМО · синтетичні дані, не реальні клієнти</div>
+
+
+    <!-- Login Screen -->
+    <div id="login-screen">
+        <div class="glass-card">
+            <h2 style="font-size: 28px; text-align: center;">VPN Monitor</h2>
+            <p style="opacity: 0.7; margin-top: 8px; font-size: 15px; text-align: center;">Введіть секретний токен (PIN)</p>
+            <div class="input-group">
+                <input type="password" id="pin-input" placeholder="Токен доступу">
+            </div>
+            <button onclick="login()">Увійти</button>
+            <div id="error-msg"></div>
+        </div>
+    </div>
+
+    <!-- Main App Screen -->
+    <div id="app-screen">
+        <div class="header">
+            <div class="title-group">
+                <h1 id="page-title">Клієнти</h1>
+                <p id="status-text">Оновлення...</p>
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <button id="add-btn" class="theme-toggle" onclick="openAddModal()" style="font-size: 24px; line-height: 1; padding: 0; display: flex; align-items: center; justify-content: center;">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                </button>
+                <button class="theme-toggle" onclick="toggleTheme()">
+                    <svg id="theme-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- Clients View -->
+        <div id="clients-view" class="client-list"></div>
+
+        <!-- Logs View -->
+        <div id="logs-view">
+            <div style="display: flex; gap: 12px; margin-bottom: 10px;">
+                <button onclick="fetchLogs()" style="flex: 1;">Оновити логи</button>
+                <button onclick="explainLogs()" style="flex: 1; background: var(--ai-color);">✨ ШІ Аналіз</button>
+            </div>
+            <div class="glass-card" id="ai-explanation"></div>
+            <div class="glass-card" id="ai-chat">
+                <h3 style="margin-bottom:10px; color:var(--ai-color);">✨ Запитати про сервер</h3>
+                <div id="ai-chat-log"></div>
+                <div style="display:flex; gap:8px; margin-top:10px;">
+                    <input type="text" id="ai-chat-input" autocomplete="off" placeholder="Напр.: чому клієнт mag-bukvar постійно відпадає?" style="flex:1 1 auto;min-width:0;" onkeydown="if(event.key==='Enter')askAI()">
+                    <button onclick="askAI()" style="padding:10px 16px; border-radius:8px; border:none; background:var(--ai-color); color:#fff; cursor:pointer;">Спитати</button>
+                </div>
+                <div style="margin-top:6px; font-size:11px; opacity:0.5;">Лише поради. Команди виконуєш ти сам.</div>
+            </div>
+            <div class="logs-container" id="logs-content">Натисніть "Оновити логи" щоб завантажити останні записи журналу xl2tpd.</div>
+        </div>
+
+        <!-- Ampere View -->
+        <div id="ampere-view">
+            <!-- Status Card -->
+            <div id="ampere-status-card" class="ampere-status-card stopped">
+                <div class="ampere-icon" id="ampere-icon">⏸</div>
+                <div>
+                    <div class="ampere-status-title" id="ampere-status-title">Завантаження...</div>
+                    <div class="ampere-status-sub" id="ampere-status-sub">Перевірка стану</div>
+                </div>
+            </div>
+
+            <!-- Buttons -->
+            <div class="ampere-btn-row">
+                <button id="ampere-start-btn" class="ampere-btn-start" onclick="startAmpere()" style="flex:1;">▶ Запустити</button>
+                <button id="ampere-stop-btn"  class="ampere-btn-stop"  onclick="stopAmpere()"  style="flex:1;">■ Зупинити</button>
+            </div>
+
+            <!-- Log -->
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
+                <span style="font-size: 13px; font-weight: 600; opacity: 0.7;">📋 Останні записи hunt.log</span>
+            </div>
+            <div class="ampere-log-wrap" id="ampere-log">Завантаження...</div>
+            <div id="ampere-refresh-note">🔄 Оновлення кожні 5 секунд</div>
+        </div>
+
+        <!-- Bottom Navigation -->
+        <div class="bottom-nav glass-card" style="padding: 15px 0;">
+            <div class="nav-item active" onclick="switchTab('clients')" id="tab-clients">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                <span style="font-size: 13px; font-weight: 500;">Клієнти</span>
+            </div>
+            <div class="nav-item" onclick="switchTab('logs')" id="tab-logs">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                <span style="font-size: 13px; font-weight: 500;">Логи</span>
+            </div>
+            <div class="nav-item ampere-tab" onclick="switchTab('ampere')" id="tab-ampere">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>
+                <span style="font-size: 13px; font-weight: 500;">Ampere</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Client Detail Bottom Sheet -->
+    <div id="detail-overlay" onclick="closeDetail()"></div>
+    <div id="detail-sheet">
+        <div class="detail-topbar">
+            <button class="detail-back" onclick="closeDetail()">←</button>
+        </div>
+        <div class="detail-header">
+            <div class="detail-avatar" id="detail-avatar">?</div>
+            <div>
+                <div class="detail-name" id="detail-name">—</div>
+                <div class="detail-status" id="detail-status">—</div>
+            </div>
+        </div>
+        <button class="toggle-btn disable" id="d-toggle-btn" onclick="toggleClient()">⛔ Деактивувати клієнта</button>
+        <button class="toggle-btn" id="d-ping-btn" onclick="pingClient()" style="background:var(--input-bg);margin-bottom:8px;">📡 Ping</button>
+        <div id="d-ping-result" style="display:none;font-family:monospace;font-size:13px;text-align:center;padding:8px;border-radius:10px;margin-bottom:10px;background:var(--input-bg);"></div>
+
+        <button class="toggle-btn" id="d-ssh-toggle" onclick="toggleSshForm()" style="background:var(--input-bg);margin-bottom:8px;">💻 SSH-команда</button>
+        <div id="d-ssh-form" style="display:none;margin-bottom:10px;">
+            <div style="display:flex;gap:8px;margin-bottom:8px;">
+                <input type="text" id="ssh-user" placeholder="Логін" autocomplete="off" style="flex:1;">
+                <input type="password" id="ssh-pass" placeholder="Пароль" autocomplete="off" style="flex:1;">
+            </div>
+            <div style="display:flex;gap:8px;margin-bottom:8px;align-items:stretch;">
+                <input type="text" id="ssh-cmd" placeholder="Команда (напр. /system resource print)" autocomplete="off" style="flex:1 1 auto;min-width:0;font-family:monospace;" onkeydown="if(event.key==='Enter')runSshCmd()">
+                <button onclick="runSshCmd()" id="ssh-run-btn" style="flex:0 0 auto;width:auto;white-space:nowrap;padding-left:18px;padding-right:18px;">▶</button>
+            </div>
+            <pre id="ssh-output" style="display:none;background:#0d0d0d;color:#d0d0d0;font-size:12px;padding:10px;border-radius:8px;max-height:300px;overflow:auto;white-space:pre-wrap;word-break:break-all;margin:0;"></pre>
+            <div style="font-size:11px;opacity:0.4;margin-top:4px;">🔒 Креди не зберігаються на сервері; у браузері — лише на час сесії</div>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-box">
+                <div class="stat-label">IP адреса (VPN)</div>
+                <div class="stat-value" id="d-ip" style="font-size:15px;">—</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-label">IP підключення</div>
+                <div class="stat-value" id="d-remote-ip" style="font-size:15px;">—</div>
+            </div>
+            <div class="stat-box full-width" id="d-login-box">
+                <div class="stat-label">Останній логін</div>
+                <div class="stat-value" id="d-login" style="font-size:15px;">—</div>
+                <div class="stat-sub" id="d-login-ago"></div>
+            </div>
+            <div class="stat-box full-width" id="d-logout-box" style="display:none;">
+                <div class="stat-label">Останній логаут</div>
+                <div class="stat-value" id="d-logout" style="font-size:15px;">—</div>
+                <div class="stat-sub" id="d-logout-ago"></div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-label">⬇ Отримано (RX)</div>
+                <div class="stat-value" id="d-rx">—</div>
+                <div class="stat-sub" id="d-rx-pkt"></div>
+                <div class="traffic-bar-wrap"><div class="traffic-bar rx" id="d-rx-bar" style="width:0%"></div></div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-label">⬆ Відправлено (TX)</div>
+                <div class="stat-value" id="d-tx">—</div>
+                <div class="stat-sub" id="d-tx-pkt"></div>
+                <div class="traffic-bar-wrap"><div class="traffic-bar tx" id="d-tx-bar" style="width:0%"></div></div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-label">Помилки RX</div>
+                <div class="stat-value" id="d-rx-err" style="font-size:18px;">—</div>
+            </div>
+            <div class="stat-box">
+                <div class="stat-label">Помилки TX</div>
+                <div class="stat-value" id="d-tx-err" style="font-size:18px;">—</div>
+            </div>
+        </div>
+        <div class="stats-grid" style="margin-top:14px;">
+            <div class="stat-box"><div class="stat-label">Аптайм 24 год</div><div class="stat-value" id="d-up24">—</div></div>
+            <div class="stat-box"><div class="stat-label">Аптайм 7 днів</div><div class="stat-value" id="d-up7">—</div></div>
+            <div class="stat-box"><div class="stat-label">Підключень 24 год</div><div class="stat-value" id="d-conn24">—</div><div class="stat-sub" id="d-recon24"></div></div>
+            <div class="stat-box"><div class="stat-label">Зміни каналу</div><div class="stat-value" id="d-chan">—</div></div>
+            <div class="stat-box"><div class="stat-label">Сер. сесія</div><div class="stat-value" id="d-avgsess" style="font-size:16px;">—</div></div>
+            <div class="stat-box"><div class="stat-label">Найдовша сесія</div><div class="stat-value" id="d-maxsess" style="font-size:16px;">—</div></div>
+            <div class="stat-box full-width">
+                <div class="stat-label">Доступність за 24 год <span id="d-tl-online" style="opacity:0.6;font-weight:400;"></span></div>
+                <div class="timeline-wrap" id="d-timeline"></div>
+                <div class="stat-sub" style="display:flex;justify-content:space-between;"><span>−24 год</span><span>зараз</span></div>
+            </div>
+        </div>
+        <div id="detail-refresh-note">🔄 Оновлення кожні 2 секунди</div>
+    </div>
+
+    <!-- Add Client Modal -->
+    <div id="add-modal">
+        <div class="glass-card">
+            <h2 style="margin-bottom: 5px;">Новий клієнт</h2>
+            <div class="input-group" style="margin: 10px 0;"><input type="text" id="new-username" placeholder="Ім'я (напр. ptiza)"></div>
+            <div class="input-group" style="margin: 10px 0;"><input type="password" id="new-password" placeholder="Пароль (обов'язково)"></div>
+            <div class="input-group" style="margin: 10px 0;"><input type="text" id="new-ip" placeholder="IP адреса"></div>
+            <div id="add-error-msg" style="color:var(--danger-color); text-align:center; font-size:14px; display:none;">Заповніть всі поля!</div>
+            <div class="modal-buttons">
+                <button class="btn-cancel" onclick="closeAddModal()">Скасувати</button>
+                <button onclick="saveClient()">Зберегти</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let apiToken = localStorage.getItem('vpn_token');
+        let refreshInterval;
+        let ampereInterval;
+
+        const savedTheme = localStorage.getItem('vpn_theme') || 'dark';
+        document.documentElement.setAttribute('data-theme', savedTheme);
+        updateThemeIcon();
+
+        if (apiToken) { checkAuth(); }
+
+        async function login() {
+            const input = document.getElementById('pin-input').value;
+            if (!input) return;
+            apiToken = input;
+            const isValid = await checkAuth();
+            if (isValid) {
+                localStorage.setItem('vpn_token', apiToken);
+            } else {
+                document.getElementById('error-msg').innerText = "Неправильний PIN. Спробуйте ще раз.";
+                apiToken = null;
+            }
+        }
+
+        async function checkAuth() {
+            try {
+                const res = await fetch('/status', { headers: { 'X-API-Token': apiToken } });
+                if (res.ok) { showApp(); return true; }
+                if (res.status === 401) { logout(); }
+                return false;
+            } catch (e) {
+                document.getElementById('error-msg').innerText = "Помилка з'єднання із сервером.";
+                return false;
+            }
+        }
+
+        function showApp() {
+            document.getElementById('login-screen').style.display = 'none';
+            document.getElementById('app-screen').style.display = 'flex';
+            fetchClients();
+            refreshInterval = setInterval(fetchClients, 15000);
+        }
+
+        function logout() {
+            localStorage.removeItem('vpn_token');
+            document.getElementById('login-screen').style.display = 'flex';
+            document.getElementById('app-screen').style.display = 'none';
+            clearInterval(refreshInterval);
+            clearInterval(ampereInterval);
+        }
+
+        function formatTime(isoString) {
+            if (!isoString) return "Невідомо";
+            const d = new Date(isoString);
+            return d.toLocaleTimeString('uk-UA', { hour: '2-digit', minute:'2-digit' }) + ' (' + d.toLocaleDateString('uk-UA', { month: 'short', day: 'numeric' }) + ')';
+        }
+
+        let lastKnownMaxIP = "10.77.0.10";
+
+        async function fetchClients() {
+            try {
+                const res = await fetch('/clients', { headers: { 'X-API-Token': apiToken } });
+                if (res.status === 401) return logout();
+                const data = await res.json();
+                document.getElementById('status-text').innerText = `Онлайн зараз: ${data.online_count} з ${data.count}`;
+                const container = document.getElementById('clients-view');
+                container.innerHTML = '';
+                if (data.clients.length === 0) {
+                    container.innerHTML = '<div class="loading">Немає підключень 💤</div>';
+                    return;
+                }
+                let maxIpLastOctet = 0;
+                data.clients.forEach(client => {
+                    const name = client.username || 'Невідомий';
+                    const isOnline = client.status === 'online';
+                    const isDisabled = client.disabled === true;
+                    const time = isOnline
+                        ? `Логін: ${formatTime(client.last_login)}`
+                        : isDisabled ? 'Деактивовано'
+                        : (client.last_logout ? `Логаут: ${formatTime(client.last_logout)}` : 'Офлайн');
+                    const dotClass = isOnline ? 'status-dot' : 'status-dot offline';
+                    container.insertAdjacentHTML('beforeend', `
+                        <div class="glass-card client-card" style="opacity: ${isOnline ? '1' : '0.6'}; cursor: pointer;" onclick="openDetail('${name}')">
+                            <div class="client-info">
+                                <div class="${dotClass}"></div>
+                                <div class="client-details"><h3>${name}</h3><p>${time}</p></div>
+                            </div>
+                            <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
+                                <div class="client-ip">${client.client_ip}</div>
+                                ${client.remote_ip ? `<div style="font-family:monospace;font-size:12px;opacity:0.6;padding:4px 10px;background:var(--input-bg);border-radius:8px;">${client.remote_ip}</div>` : ''}
+                            </div>
+                        </div>`);
+                    const parts = client.client_ip.split('.');
+                    if (parts.length === 4) {
+                        const last = parseInt(parts[3], 10);
+                        if (!isNaN(last) && last > maxIpLastOctet) maxIpLastOctet = last;
+                    }
+                });
+                if (maxIpLastOctet > 0) lastKnownMaxIP = `10.77.0.${maxIpLastOctet + 1}`;
+            } catch (e) { console.error(e); }
+        }
+
+        function openAddModal() {
+            document.getElementById('new-username').value = '';
+            document.getElementById('new-password').value = '';
+            document.getElementById('new-ip').value = lastKnownMaxIP;
+            document.getElementById('add-error-msg').style.display = 'none';
+            document.getElementById('add-modal').style.display = 'flex';
+        }
+        function closeAddModal() { document.getElementById('add-modal').style.display = 'none'; }
+
+        async function saveClient() {
+            const username = document.getElementById('new-username').value.trim();
+            const password = document.getElementById('new-password').value.trim();
+            const ip = document.getElementById('new-ip').value.trim();
+            const errorMsg = document.getElementById('add-error-msg');
+            if (!username || !password || !ip) { errorMsg.style.display = 'block'; return; }
+            errorMsg.style.display = 'none';
+            try {
+                const res = await fetch('/clients', {
+                    method: 'POST',
+                    headers: { 'X-API-Token': apiToken, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password, ip })
+                });
+                if (res.ok) { closeAddModal(); fetchClients(); }
+                else { errorMsg.innerText = 'Помилка збереження на сервері'; errorMsg.style.display = 'block'; }
+            } catch (e) { errorMsg.innerText = 'Помилка мережі'; errorMsg.style.display = 'block'; }
+        }
+
+        async function fetchLogs() {
+            const container = document.getElementById('logs-content');
+            container.innerText = "Завантаження...";
+            try {
+                const res = await fetch('/logs', { headers: { 'X-API-Token': apiToken } });
+                if (res.status === 401) return logout();
+                const data = await res.json();
+                container.innerText = data.logs || "Порожньо";
+            } catch (e) { container.innerText = "Помилка завантаження логів з сервера."; }
+        }
+
+        async function explainLogs() {
+            const logsText = document.getElementById('logs-content').innerText;
+            if (logsText.includes("Натисніть") || logsText.includes("Завантаження")) { alert("Спочатку завантажте логи!"); return; }
+            const container = document.getElementById('ai-explanation');
+            container.style.display = 'block';
+            container.innerHTML = '<div style="opacity:0.7;">✨ Аналізую логи...</div>';
+            try {
+                const response = await fetch('/ai/explain-logs', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-API-Token': localStorage.getItem('vpn_token') || '' },
+                    body: JSON.stringify({ logs: logsText })
+                });
+                const data = await response.json();
+                if (data.error) throw new Error(data.error);
+                container.innerHTML = '<h3 style="margin-bottom:8px; color:var(--ai-color);">✨ Аналіз ШІ <span style="font-size:11px; opacity:0.5; font-weight:normal;">' + (data.model || '') + '</span></h3>' + (data.explanation || '').replace(/\n/g, '<br>');
+            } catch (e) {
+                container.innerHTML = '<span style="color: var(--danger-color)">Помилка ШІ: ' + e.message + '</span>';
+            }
+        }
+
+        // --- Client Detail Sheet ---
+        let detailUsername = null;
+        let detailInterval = null;
+
+        function formatBytes(bytes) {
+            if (bytes === null || bytes === undefined) return '—';
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            if (bytes < 1024 * 1024 * 1024) return (bytes / 1024 / 1024).toFixed(2) + ' MB';
+            return (bytes / 1024 / 1024 / 1024).toFixed(2) + ' GB';
+        }
+
+        function formatDuration(isoString) {
+            if (!isoString) return '';
+            const diff = Math.floor((Date.now() - new Date(isoString)) / 1000);
+            if (diff < 60) return `${diff} сек`;
+            if (diff < 3600) return `${Math.floor(diff/60)} хв ${diff%60} сек`;
+            const h = Math.floor(diff/3600);
+            const m = Math.floor((diff%3600)/60);
+            if (h < 24) return `${h} год ${m} хв`;
+            return `${Math.floor(h/24)} дн ${h%24} год`;
+        }
+
+        function formatFullDate(isoString) {
+            if (!isoString) return '—';
+            const d = new Date(isoString);
+            return d.toLocaleString('uk-UA', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+        }
+
+        function formatDurationSec(sec) {
+            sec = Math.max(0, Math.round(sec));
+            const d = Math.floor(sec/86400), h = Math.floor((sec%86400)/3600), m = Math.floor((sec%3600)/60);
+            if (d > 0) return `${d} дн ${h} год`;
+            if (h > 0) return `${h} год ${m} хв`;
+            if (m > 0) return `${m} хв`;
+            return `${sec} с`;
+        }
+
+        function openDetail(username) {
+            detailUsername = username;
+            document.getElementById('d-ping-result').style.display = 'none';  // скидаємо ping від попереднього клієнта
+            document.getElementById('d-ssh-form').style.display = 'none';
+            document.getElementById('ssh-output').style.display = 'none';
+            document.getElementById('ssh-cmd').value = '';
+            document.getElementById('detail-sheet').scrollTop = 0;
+            document.getElementById('detail-sheet').classList.add('open');
+            document.documentElement.classList.add('no-scroll');
+            document.body.classList.add('no-scroll');
+            history.pushState({ detail: username }, '');  // щоб «назад» (Android/браузер) закривав сторінку
+            fetchDetailStats();
+            detailInterval = setInterval(fetchDetailStats, 15000);
+        }
+
+        // Кнопка ← використовує історію, щоб поведінка збігалася з апаратним «назад»
+        function closeDetail() {
+            if (history.state && history.state.detail) { history.back(); }
+            else { doCloseDetail(); }
+        }
+
+        function doCloseDetail() {
+            document.getElementById('detail-sheet').classList.remove('open');
+            document.documentElement.classList.remove('no-scroll');
+            document.body.classList.remove('no-scroll');
+            clearInterval(detailInterval);
+            detailInterval = null;
+            detailUsername = null;
+        }
+
+        window.addEventListener('popstate', () => { if (detailUsername) doCloseDetail(); });
+
+        async function fetchDetailStats() {
+            if (!detailUsername) return;
+            try {
+                const res = await fetch(`/clients/${encodeURIComponent(detailUsername)}/stats`, { headers: { 'X-API-Token': apiToken } });
+                if (!res.ok) return;
+                const d = await res.json();
+                const isOnline = d.status === 'online';
+                const isDisabled = d.disabled === true;
+                document.getElementById('detail-avatar').innerText = (d.username || '?')[0].toUpperCase();
+                document.getElementById('detail-name').innerText = d.username || '—';
+                const statusEl = document.getElementById('detail-status');
+                if (isDisabled) { statusEl.innerText = '⛔ Деактивовано'; statusEl.className = 'detail-status disabled'; }
+                else { statusEl.innerText = isOnline ? '● Онлайн' : '○ Офлайн'; statusEl.className = 'detail-status ' + (isOnline ? 'online' : ''); }
+                const toggleBtn = document.getElementById('d-toggle-btn');
+                if (isDisabled) { toggleBtn.innerText = '✅ Активувати клієнта'; toggleBtn.className = 'toggle-btn enable'; }
+                else { toggleBtn.innerText = '⛔ Деактивувати клієнта'; toggleBtn.className = 'toggle-btn disable'; }
+                document.getElementById('d-ip').innerText = d.client_ip || '—';
+                document.getElementById('d-remote-ip').innerText = d.remote_ip || '—';
+                const loginBox = document.getElementById('d-login-box');
+                const logoutBox = document.getElementById('d-logout-box');
+                // Завжди показуємо last_login
+                document.getElementById('d-login').innerText = d.last_login ? formatFullDate(d.last_login) : '—';
+                document.getElementById('d-login-ago').innerText = d.last_login
+                    ? (isOnline ? ('Тривалість: ' + formatDuration(d.last_login)) : ('Тому: ' + formatDuration(d.last_login)))
+                    : '';
+                loginBox.style.display = '';
+                // last_logout — тільки для офлайн
+                if (!isOnline && d.last_logout) {
+                    logoutBox.style.display = '';
+                    document.getElementById('d-logout').innerText = formatFullDate(d.last_logout);
+                    document.getElementById('d-logout-ago').innerText = 'Тому: ' + formatDuration(d.last_logout);
+                } else {
+                    logoutBox.style.display = 'none';
+                }
+                const t = d.traffic;
+                if (t) {
+                    document.getElementById('d-rx').innerText = formatBytes(t.rx_bytes);
+                    document.getElementById('d-tx').innerText = formatBytes(t.tx_bytes);
+                    document.getElementById('d-rx-pkt').innerText = t.rx_packets !== null ? `${t.rx_packets} пакетів` : '';
+                    document.getElementById('d-tx-pkt').innerText = t.tx_packets !== null ? `${t.tx_packets} пакетів` : '';
+                    document.getElementById('d-rx-err').innerText = t.rx_errors !== null ? t.rx_errors : '—';
+                    document.getElementById('d-tx-err').innerText = t.tx_errors !== null ? t.tx_errors : '—';
+                    const total = (t.rx_bytes || 0) + (t.tx_bytes || 0);
+                    if (total > 0) {
+                        document.getElementById('d-rx-bar').style.width = Math.round((t.rx_bytes || 0) / total * 100) + '%';
+                        document.getElementById('d-tx-bar').style.width = Math.round((t.tx_bytes || 0) / total * 100) + '%';
+                    }
+                } else {
+                    ['d-rx','d-tx','d-rx-pkt','d-tx-pkt','d-rx-err','d-tx-err'].forEach(id => { document.getElementById(id).innerText = '—'; });
+                }
+
+                // --- Статистика сесій + таймлайн доступності ---
+                const s = d.session || {};
+                const pct = v => (v === null || v === undefined) ? '—' : v + '%';
+                document.getElementById('d-up24').innerText = pct(s.uptime_24h_pct);
+                document.getElementById('d-up7').innerText = pct(s.uptime_7d_pct);
+                document.getElementById('d-conn24').innerText = (s.connects_24h ?? '—');
+                document.getElementById('d-recon24').innerText = (s.reconnects_24h != null ? ('повних: ' + s.reconnects_24h) : '');
+                document.getElementById('d-chan').innerText = (s.channel_switches_total ?? '—');
+                document.getElementById('d-avgsess').innerText = s.avg_session_sec != null ? formatDurationSec(s.avg_session_sec) : '—';
+                document.getElementById('d-maxsess').innerText = s.longest_session_sec != null ? formatDurationSec(s.longest_session_sec) : '—';
+                document.getElementById('d-tl-online').innerText = s.uptime_24h_pct != null ? ('· онлайн ' + s.uptime_24h_pct + '%') : '';
+
+                const tl = document.getElementById('d-timeline');
+                tl.innerHTML = '';
+                const DAY = 86400;
+                const segs = (s.timeline_24h || []).slice().sort((a,b)=>a[0]-b[0]);
+                let cursor = 0;
+                const addSeg = (w, up) => { const el = document.createElement('div'); el.className = 'timeline-seg' + (up?' up':''); el.style.width = (w/DAY*100)+'%'; tl.appendChild(el); };
+                segs.forEach(([a,b]) => {
+                    a = Math.max(0, Math.min(DAY, a)); b = Math.max(0, Math.min(DAY, b));
+                    if (b <= a) return;
+                    if (a > cursor) addSeg(a - cursor, false);
+                    addSeg(b - a, true);
+                    cursor = b;
+                });
+                if (cursor < DAY) addSeg(DAY - cursor, false);
+            } catch(e) { console.error(e); }
+        }
+
+        async function toggleClient() {
+            if (!detailUsername) return;
+            const btn = document.getElementById('d-toggle-btn');
+            btn.disabled = true; btn.style.opacity = '0.5';
+            try {
+                const res = await fetch(`/clients/${encodeURIComponent(detailUsername)}/toggle`, { method: 'POST', headers: { 'X-API-Token': apiToken } });
+                if (!res.ok) { alert('Помилка на сервері'); return; }
+                await fetchDetailStats();
+                fetchClients();
+            } catch(e) { alert('Помилка мережі'); }
+            finally { btn.disabled = false; btn.style.opacity = '1'; }
+        }
+
+        async function pingClient() {
+            const ip = document.getElementById('d-ip').innerText.trim();
+            if (!ip || ip === '—') return;
+            const btn = document.getElementById('d-ping-btn');
+            const out = document.getElementById('d-ping-result');
+            btn.disabled = true; btn.style.opacity = '0.5';
+            out.style.display = 'block';
+            out.style.color = 'var(--text-secondary, #888)';
+            out.innerText = `📡 Пінгую ${ip}…`;
+            try {
+                const res = await fetch(`/clients/${encodeURIComponent(ip)}/ping`, { headers: { 'X-API-Token': apiToken } });
+                const d = await res.json();
+                if (d.alive) {
+                    out.style.color = 'var(--success-color, #2ecc71)';
+                    out.innerText = `✅ ${ip} — живий · ${d.avg_ms ? d.avg_ms + ' ms' : ''} · втрати ${d.loss_pct}%`;
+                } else {
+                    out.style.color = 'var(--danger-color, #e74c3c)';
+                    out.innerText = `❌ ${ip} — недоступний (втрати ${d.loss_pct}%)`;
+                }
+            } catch(e) {
+                out.style.color = 'var(--danger-color, #e74c3c)';
+                out.innerText = '❌ Помилка мережі';
+            } finally { btn.disabled = false; btn.style.opacity = '1'; }
+        }
+
+        function toggleSshForm() {
+            const f = document.getElementById('d-ssh-form');
+            const show = f.style.display === 'none';
+            f.style.display = show ? 'block' : 'none';
+            if (show) {
+                // відновлюємо логін/пароль із sessionStorage (живуть лише до закриття вкладки)
+                document.getElementById('ssh-user').value = sessionStorage.getItem('ssh_user') || '';
+                document.getElementById('ssh-pass').value = sessionStorage.getItem('ssh_pass') || '';
+                document.getElementById('ssh-cmd').focus();
+            }
+        }
+
+        async function runSshCmd() {
+            const ip = document.getElementById('d-ip').innerText.trim();
+            const user = document.getElementById('ssh-user').value.trim();
+            const password = document.getElementById('ssh-pass').value;
+            const command = document.getElementById('ssh-cmd').value.trim();
+            const out = document.getElementById('ssh-output');
+            const btn = document.getElementById('ssh-run-btn');
+            if (!ip || ip === '—') return;
+            if (!user || !password || !command) { alert('Заповніть логін, пароль і команду'); return; }
+            // запам'ятовуємо креди на час сесії браузера
+            sessionStorage.setItem('ssh_user', user);
+            sessionStorage.setItem('ssh_pass', password);
+            btn.disabled = true; btn.style.opacity = '0.5';
+            out.style.display = 'block';
+            out.textContent = `$ ${command}\n⏳ виконую на ${ip}…`;
+            try {
+                const res = await fetch(`/clients/${encodeURIComponent(ip)}/exec`, {
+                    method: 'POST',
+                    headers: { 'X-API-Token': apiToken, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user, password, command })
+                });
+                const d = await res.json();
+                if (!res.ok) { out.textContent = `$ ${command}\n❌ ${d.error || 'помилка'}`; return; }
+                let txt = `$ ${command}\n`;
+                if (d.stdout) txt += d.stdout;
+                if (d.stderr) txt += (d.stdout ? '\n' : '') + d.stderr;
+                if (!d.stdout && !d.stderr) txt += '(порожній вивід)';
+                if (d.exit_code !== 0) txt += `\n[код виходу: ${d.exit_code}]`;
+                out.textContent = txt;
+            } catch(e) {
+                out.textContent = `$ ${command}\n❌ Помилка мережі`;
+            } finally { btn.disabled = false; btn.style.opacity = '1'; }
+        }
+
+        // --- Ampere Hunter ---
+        function renderAmpereLog(text) {
+            if (!text) return '<span style="opacity:0.5">Лог порожній</span>';
+            return text.split('\n').map(line => {
+                if (!line.trim()) return '';
+                if (/success|знайдено|created|✓/i.test(line)) return `<span class="ampere-log-line-ok">${escHtml(line)}</span>`;
+                if (/error|failed|stopping|зупин|non-capacity/i.test(line)) return `<span class="ampere-log-line-err">${escHtml(line)}</span>`;
+                return `<span class="ampere-log-line-info">${escHtml(line)}</span>`;
+            }).join('\n');
+        }
+
+        function escHtml(s) {
+            return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        }
+
+        async function fetchAmpere() {
+            try {
+                const res = await fetch('/ampere', { headers: { 'X-API-Token': apiToken } });
+                if (res.status === 401) return logout();
+                const d = await res.json();
+
+                const card = document.getElementById('ampere-status-card');
+                const icon = document.getElementById('ampere-icon');
+                const title = document.getElementById('ampere-status-title');
+                const sub = document.getElementById('ampere-status-sub');
+                const startBtn = document.getElementById('ampere-start-btn');
+                const stopBtn = document.getElementById('ampere-stop-btn');
+
+                if (d.success) {
+                    card.className = 'ampere-status-card success';
+                    icon.innerHTML = '🎉';
+                    title.innerText = 'Інстанс створено!';
+                    sub.innerText = d.success.substring(0, 120);
+                    startBtn.disabled = true; startBtn.style.opacity = '0.4';
+                    stopBtn.disabled = true;  stopBtn.style.opacity = '0.4';
+                } else if (d.running) {
+                    card.className = 'ampere-status-card running';
+                    icon.innerHTML = '<span class="ampere-spinner">⚡</span>';
+                    title.innerText = 'Пошук активний';
+                    sub.innerText = `PID: ${d.pid} · Шукає Ampere A1 4/24 у Frankfurt`;
+                    startBtn.disabled = true; startBtn.style.opacity = '0.4';
+                    stopBtn.disabled = false; stopBtn.style.opacity = '1';
+                } else {
+                    card.className = 'ampere-status-card stopped';
+                    icon.innerHTML = '⏸';
+                    title.innerText = 'Пошук зупинено';
+                    sub.innerText = 'Натисніть ▶ Запустити щоб почати';
+                    startBtn.disabled = false; startBtn.style.opacity = '1';
+                    stopBtn.disabled = true;  stopBtn.style.opacity = '0.4';
+                }
+
+                // Log
+                const logEl = document.getElementById('ampere-log');
+                const wasAtBottom = logEl.scrollHeight - logEl.scrollTop <= logEl.clientHeight + 50;
+                logEl.innerHTML = renderAmpereLog(d.last_logs);
+                if (wasAtBottom) logEl.scrollTop = logEl.scrollHeight;
+
+            } catch(e) { console.error('ampere fetch error', e); }
+        }
+
+        async function startAmpere() {
+            const btn = document.getElementById('ampere-start-btn');
+            btn.disabled = true; btn.innerText = '...';
+            try {
+                await fetch('/ampere/start', { method: 'POST', headers: { 'X-API-Token': apiToken } });
+                setTimeout(fetchAmpere, 1500);
+            } finally { btn.innerText = '▶ Запустити'; }
+        }
+
+        async function stopAmpere() {
+            if (!confirm('Зупинити пошук Ampere Hunter?')) return;
+            const btn = document.getElementById('ampere-stop-btn');
+            btn.disabled = true; btn.innerText = '...';
+            try {
+                await fetch('/ampere/stop', { method: 'POST', headers: { 'X-API-Token': apiToken } });
+                setTimeout(fetchAmpere, 1000);
+            } finally { btn.innerText = '■ Зупинити'; }
+        }
+
+        // --- Tab Switching ---
+        function switchTab(tab) {
+            ['clients','logs','ampere'].forEach(t => {
+                document.getElementById(`tab-${t}`).classList.remove('active');
+                document.getElementById(`${t}-view`).style.display = 'none';
+            });
+            document.getElementById(`tab-${tab}`).classList.add('active');
+            document.getElementById(`${tab}-view`).style.display = 'flex';
+
+            document.getElementById('add-btn').style.display = tab === 'clients' ? 'flex' : 'none';
+            document.getElementById('status-text').style.display = tab === 'clients' ? 'block' : 'none';
+
+            if (tab === 'clients') {
+                document.getElementById('page-title').innerText = 'Клієнти';
+                fetchClients();
+            } else if (tab === 'logs') {
+                document.getElementById('page-title').innerText = 'Логи сервера';
+                fetchLogs();
+            } else if (tab === 'ampere') {
+                document.getElementById('page-title').innerText = 'Ampere Hunter';
+                fetchAmpere();
+                clearInterval(ampereInterval);
+                ampereInterval = setInterval(fetchAmpere, 30000);
+            }
+
+            // зупинити ampere-інтервал якщо перейшли на інший таб
+            if (tab !== 'ampere') {
+                clearInterval(ampereInterval);
+                ampereInterval = null;
+            }
+        }
+
+        function toggleTheme() {
+            const current = document.documentElement.getAttribute('data-theme');
+            const next = current === 'dark' ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', next);
+            localStorage.setItem('vpn_theme', next);
+            document.querySelector('meta[name="theme-color"]').setAttribute('content', next === 'dark' ? '#0f172a' : '#f1f5f9');
+            updateThemeIcon();
+        }
+
+        function updateThemeIcon() {
+            const theme = document.documentElement.getAttribute('data-theme');
+            const icon = document.getElementById('theme-icon');
+            if (theme === 'light') {
+                icon.innerHTML = '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>';
+            } else {
+                icon.innerHTML = '<circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>';
+            }
+        }
+    
+        let aiHistory = [];
+        async function askAI() {
+            const input = document.getElementById('ai-chat-input');
+            const log = document.getElementById('ai-chat-log');
+            const q = input.value.trim();
+            if (!q) return;
+            input.value = '';
+            log.innerHTML += '<div style="margin:10px 0; padding:8px 12px; border-radius:8px; background:rgba(127,127,127,0.12);"><b>Ви:</b> ' + q.replace(/</g, '&lt;') + '</div>';
+            const think = document.createElement('div');
+            think.style.cssText = 'margin:10px 0; opacity:0.6;';
+            think.textContent = 'Думаю...';
+            log.appendChild(think);
+            log.scrollTop = log.scrollHeight;
+            try {
+                const res = await fetch('/ai/ask', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-API-Token': localStorage.getItem('vpn_token') || '' },
+                    body: JSON.stringify({ question: q, history: aiHistory })
+                });
+                const data = await res.json();
+                if (data.error) throw new Error(data.error);
+                think.remove();
+                log.innerHTML += '<div style="margin:10px 0; padding:8px 12px; border-radius:8px; border-left:3px solid var(--ai-color);">' + (data.answer || '').replace(/</g, '&lt;').replace(/\n/g, '<br>') + '</div>';
+                aiHistory.push({ role: 'user', content: q });
+                aiHistory.push({ role: 'assistant', content: data.answer || '' });
+                if (aiHistory.length > 6) aiHistory = aiHistory.slice(-6);
+            } catch (e) {
+                think.remove();
+                log.innerHTML += '<div style="margin:10px 0; color:var(--danger-color);">Помилка: ' + e.message + '</div>';
+            }
+            log.scrollTop = log.scrollHeight;
+        }
+    </script>
+</body>
+</html>
