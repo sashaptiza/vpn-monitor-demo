@@ -1,6 +1,6 @@
 # VPN Monitor — demo
 
-A demo build of a monitoring panel I wrote and run in production for an L2TP/IPsec
+A demo build of a monitoring panel I built and run in production for an L2TP/IPsec
 VPN service: connection state, per-client session history, uptime, traffic counters,
 detection of channel switching between wired and LTE, and log review.
 
@@ -25,10 +25,12 @@ command on a device, adding clients) is disabled and returns a "demo mode" respo
 ## Stack
 
 Python / Flask on Ubuntu, single-page vanilla JS front end, nginx, token
-authentication over HTTPS only. Built and operated by one person — the same person
-who gets called when it breaks at 2am.
+authentication over HTTPS only.
 
----
+## How it was built
 
-Oleksandr Zhuravel — network engineer, WISP operator since 2014.
-Lubny, Ukraine.
+Development is AI-assisted: I do not write the production code by hand. Mine are the
+requirements, the architecture decisions, the deployment and the day-to-day operation —
+and the verification, which I do by behaviour and measurement rather than by reading
+code. Built and operated by one person — the same person who gets called when it
+breaks at 2am.
